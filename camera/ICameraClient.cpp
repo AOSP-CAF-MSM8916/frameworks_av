@@ -138,10 +138,7 @@ status_t BnCameraClient::onTransact(
             int32_t ext2    = 0;
             if ((msgType == CAMERA_MSG_PREVIEW_FRAME) && (ext1 == CAMERA_FRAME_DATA_FD)) {
                 ext2 = data.readFileDescriptor();
-<<<<<<< HEAD
                 ALOGD("onTransact: CAMERA_MSG_PREVIEW_FRAME fd = %d", ext2);
-=======
->>>>>>> ae49228a5... Camera: Add support for preview frame fd
             } else {
                 ext2 = data.readInt32();
             }
