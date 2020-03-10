@@ -62,7 +62,6 @@
 #include "ESDS.h"
 #include <media/stagefright/Utils.h>
 #include "mediaplayerservice/AVNuExtensions.h"
-#define MAX_OUTPUT_FRAME_RATE 60
 
 namespace android {
 
@@ -206,6 +205,7 @@ NuPlayer::NuPlayer(pid_t pid, const sp<MediaClock> &mediaClock)
       mAudioDecoderGeneration(0),
       mVideoDecoderGeneration(0),
       mRendererGeneration(0),
+      mMaxOutputFrameRate(60),
       mLastStartedPlayingTimeNs(0),
       mLastStartedRebufferingTimeNs(0),
       mPreviousSeekTimeUs(0),
@@ -1058,7 +1058,8 @@ void NuPlayer::onMessageReceived(const sp<AMessage> &msg) {
                 }
 
                 // Pause the renderer till video queue pre-rolls
-                if (!mPaused && mVideoDecoder != NULL && mAudioDecoder != NULL) {
+                if (!mPaused && mVideoDecoder != NULL && mAudioDecoder != NULL
+                   && !mRenderer->isVideoSampleReceived()) {
                     ALOGI("NOTE: Pausing Renderer after decoders instantiated..");
                     mRenderer->pause();
                     // wake up renderer if timed out
@@ -1539,15 +1540,8 @@ void NuPlayer::onMessageReceived(const sp<AMessage> &msg) {
         {
             // don't break pause if client requested renderer to pause too.
             if (!mPaused && mRenderer != NULL && !mRenderer->isVideoPrerollCompleted()) {
-                ALOGI("NOTE: Video preroll timed out or video encounterred error, "
-                    "resume renderer and shutdown video decoder");
+                ALOGI("NOTE: Video preroll timed out, resume renderer");
                 mRenderer->resume();
-                // Flush video decoder when preroll timeout, make playback audio only. If still keep
-                // video track, will see framedrop when video buffer coming.
-                mDeferredActions.push_back(
-                    new FlushDecoderAction(FLUSH_CMD_NONE /* audio */,
-                                        FLUSH_CMD_SHUTDOWN /*video */));
-                processDeferredActions();
             }
             break;
         }
@@ -1688,9 +1682,16 @@ void NuPlayer::onStart(int64_t startPositionUs, MediaPlayerSeekMode mode) {
         return;
     }
 
+    if (mSurface != NULL) {
+        int64_t refreshDuration = 0;
+        native_window_get_refresh_cycle_duration(mSurface.get(), &refreshDuration);
+        if (refreshDuration > 0)
+            mMaxOutputFrameRate = round(1000000000.0f / refreshDuration);
+    }
+
     float rate = getFrameRate();
     if (rate > 0) {
-        rate = (rate > MAX_OUTPUT_FRAME_RATE) ? MAX_OUTPUT_FRAME_RATE : rate;
+        rate = (rate > mMaxOutputFrameRate) ? mMaxOutputFrameRate : rate;
         mRenderer->setVideoFrameRate(rate);
     }
 
@@ -2032,8 +2033,8 @@ status_t NuPlayer::instantiateDecoder(
         if (rate > 0) {
             format->setFloat("operating-rate", rate * mPlaybackSettings.mSpeed);
         }
-        if (rate <= 0 || rate > MAX_OUTPUT_FRAME_RATE)
-            format->setInt32("output-frame-rate", MAX_OUTPUT_FRAME_RATE);
+        if (rate <= 0 || rate > mMaxOutputFrameRate)
+            format->setInt32("output-frame-rate", mMaxOutputFrameRate);
     }
 
     Mutex::Autolock autoLock(mDecoderLock);
